@@ -8,11 +8,10 @@ captures/
 *.apk
 *.aab
 *.ap_
-*.dex
 *.class
 *.jar
-!app/libs/compile_only/*.jar
-!hotupdate/app/libs/compile_only/*.jar
+!a-完整包/app/libs/compile_only/*.jar
+!c-热更新/app/libs/compile_only/*.jar
 
 # ── 编译中间物 / 备份 ──
 .backup/
@@ -21,14 +20,13 @@ __pycache__/
 *.log
 
 # ── 配置与密钥（只提交 example）──
-server/config.php
-server/pay/config.php
-server/panel/config.php
-server/*.pem
+b-后端/config.php
+b-后端/pay/config.php
+b-后端/panel/config.php
 *.pem
 *.key
 
 # ── 运行时 ──
-server/pay/pay.log
-server/panel/*.log
-hotupdate/要热更新的dex/
+b-后端/pay/pay.log
+b-后端/panel/*.log
+c-热更新/要热更新的dex/
