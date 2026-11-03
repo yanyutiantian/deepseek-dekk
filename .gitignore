@@ -1,0 +1,34 @@
+# ── Gradle / Android ──
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.jar
+!app/libs/compile_only/*.jar
+!hotupdate/app/libs/compile_only/*.jar
+
+# ── 编译中间物 / 备份 ──
+.backup/
+__pycache__/
+*.pyc
+*.log
+
+# ── 配置与密钥（只提交 example）──
+server/config.php
+server/pay/config.php
+server/panel/config.php
+server/*.pem
+*.pem
+*.key
+
+# ── 运行时 ──
+server/pay/pay.log
+server/panel/*.log
+hotupdate/要热更新的dex/

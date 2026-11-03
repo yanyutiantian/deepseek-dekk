@@ -1,0 +1,61 @@
+CREATE TABLE IF NOT EXISTS dekk_users (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ email VARCHAR(100) NOT NULL UNIQUE,
+ password_hash VARCHAR(255) NOT NULL,
+ nickname VARCHAR(60) NOT NULL,
+ avatar VARCHAR(120) NOT NULL DEFAULT '',
+ follows INT NOT NULL DEFAULT 0,
+ fans INT NOT NULL DEFAULT 0,
+ personas INT NOT NULL DEFAULT 0,
+ likes INT NOT NULL DEFAULT 0,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 线上已有库用 migrate_profile.php 增量添加：
+--   avatar / follows / fans / personas / likes（用户中心的头像与四个计数）
+--   头像文件保存在 <后端配置目录>/uploads/，只能通过 ?action=avatar&id= 读取。
+CREATE TABLE IF NOT EXISTS dekk_tokens (
+ token_hash CHAR(64) PRIMARY KEY,
+ user_id BIGINT UNSIGNED NOT NULL,
+ expires_at DATETIME NOT NULL,
+ FOREIGN KEY(user_id) REFERENCES dekk_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS dekk_codes (
+ email VARCHAR(100) NOT NULL,
+ purpose VARCHAR(20) NOT NULL,
+ code_hash VARCHAR(255) NOT NULL,
+ expires_at DATETIME NOT NULL,
+ attempts INT NOT NULL DEFAULT 0,
+ PRIMARY KEY(email,purpose)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS dekk_limits (
+ bucket CHAR(64) PRIMARY KEY,
+ window_start BIGINT NOT NULL,
+ hits INT NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS dekk_personas (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ user_id BIGINT UNSIGNED NOT NULL,
+ name VARCHAR(100) NOT NULL,
+ description TEXT NOT NULL,
+ prompt MEDIUMTEXT NOT NULL,
+ visibility ENUM('public','private') NOT NULL DEFAULT 'private',
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX(visibility,id),
+  FOREIGN KEY(user_id) REFERENCES dekk_users(id) ON DELETE CASCADE
+ ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 聊天记录迁移：服务端只存加密后的密文，永不持有明文与授权码本身（只存授权码的 SHA-256）。
+-- 备份超过 24 小时在读取时清理；blob 上限与 V2 信封上限（DEKK_ENVELOPE_MAX）需要一起评估。
+CREATE TABLE IF NOT EXISTS dekk_backups (
+ id CHAR(32) PRIMARY KEY,
+ user_id BIGINT UNSIGNED NOT NULL,
+ `blob` MEDIUMTEXT NOT NULL,
+ blob_hash CHAR(64) NOT NULL,
+ code_hash CHAR(64) NOT NULL,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ expires_at DATETIME NOT NULL,
+ INDEX(code_hash),
+ INDEX(expires_at),
+ FOREIGN KEY(user_id) REFERENCES dekk_users(id) ON DELETE CASCADE
+ ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -1,0 +1,190 @@
+package com.dekk.yanyu;
+
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
+import android.util.Base64;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 原版签名伪装：让宿主 / 微信 SDK / 数美读到的仍然是「官方 DeepSeek 签名」。
+ *
+ * <p><b>为什么必须要</b>：LSPatch（免 root 修补）与重打包都会改签名，
+ * 而 <b>微信登录</b>会做签名校验（{@code com.tencent.mm.opensdk} 里的
+ * {@code WXApiImplComm} / {@code BaseWXApiImplV10} 会 {@code getPackageInfo(pkg, 64)}
+ * 后比对签名）——签名不一致会导致微信登录直接失败。数美/宿主自身的完整性校验同理。
+ *
+ * <p>证书来源：官方 {@code DeepSeek_2.5.1.apk} 的 {@code META-INF/CERT.RSA}（PKCS#7），
+ * 用 openssl 抽出证书 DER（897 字节）：
+ * <pre>
+ *   subject = C=cn, ST=zhejiang, L=hangzhou, O=DeepSeek, OU=DeepSeek, CN=DeepSeek
+ *   SHA-256 = C6:89:3C:53:68:F7:B5:12:2F:EC:DA:FC:6C:4E:CF:49:
+ *             E0:B3:DC:4E:42:BD:16:6C:DB:64:69:07:78:8C:7F:FA
+ * </pre>
+ *
+ * <p>落地方式：hook {@code PackageManager#getPackageInfo}（{@code ApplicationPackageManager}
+ * 是真实实现类，一并 hook），命中宿主包名且请求了签名位时，把 {@code signatures}
+ * 换回原版；API 28+ 的 {@code signingInfo} 尽力用反射同步。
+ */
+final class SignatureMask {
+
+    /** 宿主包名。 */
+    private static final String HOST_PACKAGE = "com.deepseek.chat";
+
+    /** 官方签名证书（DER，897 字节，base64）。 */
+    private static final String CERT_B64 =
+            "MIIDfTCCAmWgAwIBAgIIR46gnBlO2AUwDQYJKoZIhvcNAQELBQAwbDELMAkGA1UEBhMCY24xETAPBgNVBAgTCHpoZWpp"
+                    + "YW5nMREwDwYDVQQHEwhoYW5nemhvdTERMA8GA1UEChMIRGVlcFNlZWsxETAPBgNVBAsTCERlZXBTZWVrMREwDwYDVQQD"
+                    + "EwhEZWVwU2VlazAgFw0yNDExMDQwMjI5MDlaGA8yMDUyMDMyMjAyMjkwOVowbDELMAkGA1UEBhMCY24xETAPBgNVBAgT"
+                    + "CHpoZWppYW5nMREwDwYDVQQHEwhoYW5nemhvdTERMA8GA1UEChMIRGVlcFNlZWsxETAPBgNVBAsTCERlZXBTZWVrMREw"
+                    + "DwYDVQQDEwhEZWVwU2VlazCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAIPUujICOT1P2CrD3Nvrq6qBqPnG"
+                    + "1/Io1RdavkGfEtR2/g/GkGx8ow700oXjVmgNFnlJVp/vleyIJdin5sJ3cXTNSOVdtAAiAvrViSI8pjKxVdROc5sKiMyP"
+                    + "wY0TCLUjkrtlhE+r7jPEFQn3uC6AZctNH8xcEHMNAA7uj6PcL3ZWdrGlAFgVtnrYDr2/3gAELgyr2Vr8OyVeY00SoqVg"
+                    + "4nIiC8icFxQTafmoNnqB7PuldeWmFNb1N0Tl7l6JVj+mU6vBktL9ebRZ1h0gMXuTyXYLqxKq9+4AcIkvCFaWoF8uMZlW4t4"
+                    + "d40vcTMOmTuhG4rJ0Uo36fs2qFyiLnWuNXCsCAwEAAaMhMB8wHQYDVR0OBBYEFE9hPlFqq8xb6rqyhHPZK5j4s1yzMA0G"
+                    + "CSqGSIb3DQEBCwUAA4IBAQAU7xdzKXPtWi0NiklpC8m7VqdDrMaLJYi1tTuwQ7rKAimANcCz1ZEa9ZZevlG1x+/mM7QR"
+                    + "46B0OjJMZEl6c0a1vGl9i4GpT3fGTHwpFsOsLL9Ntp6nluUQOTsZen1Fu+7waDlSgRYz5eg6vpk4gF/KR+5qk/I86UyUlQbw"
+                    + "APyFhE6Cu6+ruPKBDtFtX9JeuW22NO63vpbx2xZR75aYy5mTM9S0Fmmz72AalzApi5eVLDtQigIXHob+3QonlW/hF1ED5WNC"
+                    + "fqqfiPodwpVrm5opJJdsjwyOmjnF7Pu9lnhRGd/wwhkhWhWXmAcMM4x173BoSUEhP19yBn/EM/vyzviY";
+
+    /** GET_SIGNATURES。 */
+    private static final int FLAG_SIGNATURES = 0x00000040;
+
+    /** GET_SIGNING_CERTIFICATES（API 28+）。 */
+    private static final long FLAG_SIGNING_CERTIFICATES = 0x08000000L;
+
+    private static Signature original;
+    private static volatile boolean enabled = true;
+    private static boolean installed;
+    private static boolean logged;
+
+    static void setEnabled(boolean on) {
+        enabled = on;
+    }
+
+    static boolean enabled() {
+        return enabled;
+    }
+
+    /** 官方签名对象（构造失败返回 null）。 */
+    static Signature original() {
+        if (original != null) return original;
+        try {
+            byte[] der = Base64.decode(CERT_B64, Base64.DEFAULT);
+            original = new Signature(der);
+        } catch (Throwable t) {
+            HotBridge.log("[DEKK][签名] 构造原版签名失败: " + t);
+        }
+        return original;
+    }
+
+    /**
+     * 把 PackageInfo 里的签名换回官方签名（含 API 28+ 的 signingInfo，尽力而为）。
+     *
+     * @return true 表示确实替换过
+     */
+    static boolean apply(PackageInfo info) {
+        if (info == null) return false;
+        Signature sig = original();
+        if (sig == null) return false;
+        boolean changed = false;
+        try {
+            Signature[] current = info.signatures;
+            if (current == null || current.length == 0 || !sig.equals(current[0])) {
+                info.signatures = new Signature[]{sig};
+                changed = true;
+            }
+        } catch (Throwable ignored) {
+        }
+        // API 28+：signingInfo（signatures 可能为空，很多新 SDK 用这个）
+        try {
+            Object signingInfo = HotHelpers.getObjectField(info, "signingInfo");
+            if (signingInfo != null) {
+                Object details = HotHelpers.getObjectField(signingInfo, "mSigningDetails");
+                if (details != null) {
+                    Object signatures = HotHelpers.getObjectField(details, "signatures");
+                    if (signatures instanceof Signature[]) {
+                        Signature[] arr = (Signature[]) signatures;
+                        if (arr.length == 0 || !sig.equals(arr[0])) {
+                            HotHelpers.setObjectField(details, "signatures", new Signature[]{sig});
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // mSigningDetails 是 @hide 字段，部分 ROM 反射会被拦，忽略即可
+        }
+        if (changed && !logged) {
+            logged = true;
+            HotBridge.log("[DEKK][签名] 已把宿主签名伪装为官方签名（CN=DeepSeek）");
+        }
+        return changed;
+    }
+
+    /** 跨 ClassLoader 防重复（同 AntiDetect）。 */
+    private static final String MARK = "dekk.sig.masked";
+
+    static synchronized void install(ClassLoader loader) {
+        if (installed) return;
+        if ("1".equals(System.getProperty(MARK))) {
+            installed = true;
+            HotBridge.log("[DEKK][签名] 壳已装过，跳过重复安装");
+            return;
+        }
+        installed = true;
+        List<HotUnhook> hooks = new ArrayList<HotUnhook>();
+
+        HotHook infoHook = new HotHook(10000) {
+            @Override
+            protected void afterHookedMethod(HotParam p) {
+                if (!enabled) return;
+                try {
+                    Object result = p.getResult();
+                    if (result instanceof PackageInfo) {
+                        PackageInfo info = (PackageInfo) result;
+                        if (HOST_PACKAGE.equals(info.packageName)) apply(info);
+                    } else if (result instanceof PackageInfo[]) {
+                        for (PackageInfo info : (PackageInfo[]) result) {
+                            if (info != null && HOST_PACKAGE.equals(info.packageName)) apply(info);
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        };
+
+        // 真实实现类（AOSP/小米等一致），用 boot classloader 找
+        String[] impls = {"android.app.ApplicationPackageManager"};
+        for (String impl : impls) {
+            try {
+                Class<?> clazz = HotHelpers.findClass(impl, null);
+                try {
+                    hooks.add(HotHelpers.findAndHookMethod(clazz, "getPackageInfo",
+                            String.class, Integer.TYPE, infoHook));
+                } catch (Throwable ignored) {
+                }
+                // API 33+ 的 (String, PackageInfoFlags) 重载：用反射拿类，
+                // 低版本设备 / 低版本 SDK 上不存在时也不会编译/运行报错。
+                try {
+                    Class<?> flagsCls = Class.forName("android.content.pm.PackageInfoFlags");
+                    hooks.add(HotHelpers.findAndHookMethod(clazz, "getPackageInfo",
+                            String.class, flagsCls, infoHook));
+                } catch (Throwable ignored) {
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        if (hooks.isEmpty()) {
+            HotBridge.log("[DEKK][签名] 安装失败：没找到可 hook 的 PackageManager 实现");
+        } else {
+            HotBridge.log("[DEKK][签名] 原版签名伪装已安装（hook 数 " + hooks.size() + "）");
+            System.setProperty(MARK, "1");
+        }
+    }
+
+    private SignatureMask() { }
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+	xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:app="http://schemas.android.com/apk/res-auto"
+	android:layout_width="match_parent"
+	android:layout_height="match_parent">
+
+	<TextView
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:text="傻傻的宝宝，不应该点开我哟！划掉我的后台，点开DeepSeek吧！官网https://dekk.example.com，软件完全免费，适配DeepSeek2.5.1版本，除某些核心功能，其他功能均可拆包借鉴使用"/>
+
+</LinearLayout>
+

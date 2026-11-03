@@ -1,0 +1,277 @@
+package com.dekk.yanyu;
+
+import android.content.ContentResolver;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.os.Debug;
+import android.provider.Settings;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 环境检测对抗（数据源伪装）：让数美读到的是「一台干净设备」。
+ *
+ * <p><b>为什么这么做（不直接 hook 数美）</b>：数美自带 {@code hookJava} 检测，
+ * 直接改它自己的方法/字段（如 {@code ISI_HAS_MAGISK}，它是编译期常量，也 hook 不到）
+ * 反而容易被判高危。所以这里改的是它**读取的数据源**，命中面最小、日志可移除。
+ *
+ * <p>逆向依据（2.5.1 classes_smali）：
+ * <ul>
+ *   <li>Xposed 全套：{@code l1111l111111Il.smali} 里有
+ *       {@code XposedBridge.jar} / {@code de.robv.android.xposed.XposedBridge} /
+ *       {@code XposedHelpers} / {@code sHookedMethodCallbacks} / {@code VMOS_ROOT_DIR}；</li>
+ *   <li>adb / debug：{@code l111l1111llIl.smali} 里的 {@code adb_enabled}、{@code debug}；</li>
+ *   <li>Magisk：{@code IServiceImp.smali} 的 {@code ISI_HAS_MAGISK}；</li>
+ *   <li>代理：数美里有 {@code proxy} 相关键。</li>
+ * </ul>
+ *
+ * <p>另外，LSPatch（免 root 修补）会重打包 APK、并按宿主规则改网络/加载方式，
+ * 于是「已安装应用列表 / 文件路径 / 类加载」里都会出现修补器的痕迹，这里一并过滤。
+ */
+final class AntiDetect {
+
+    /** 命中这些片段的路径 / 类名一律当成"不存在"。 */
+    private static final String[] SUSPECT = {
+            "magisk", "Magisk", "MAGISK",
+            "superuser", "Superuser",
+            "busybox", "BusyBox",
+            "xposed", "Xposed", "XPOSED",
+            "substrate", "Substrate",
+            "frida", "Frida",
+            "VMOS", "vmos",
+            "riru", "Riru", "zygisk", "Zygisk",
+            "lsposed", "LSPosed", "LSPatch", "lspatch",
+            // KernelSU / APatch 的内核层痕迹（/data/adb/ksu、ksu.bin 等）。
+            // 注意：不要加裸 "ksu" —— 会误伤 libvndksupport.so 这类正常库名。
+            "kernelsu", "KernelSU", "apatch", "APatch",
+            "su/bin", "su/xbin", "xbin/su", "sbin/su", "sbin/magisk",
+    };
+
+    /** 代理相关的系统属性。 */
+    private static final String[] PROXY_KEYS = {
+            "http.proxyHost", "http.proxyPort", "https.proxyHost", "https.proxyPort",
+            "socksProxyHost", "socksProxyPort",
+    };
+
+    /**
+     * 已安装应用探测里要“隐藏”的包名（root 管理器 / Xposed / LSPatch / Magisk 等）。
+     *
+     * <p>数美与宿主都会用 {@code getPackageInfo} / {@code getInstalledPackages} 扫这些包，
+     * 命中即视为设备被改过。
+     */
+    private static final String[] SUSPECT_PKGS = {
+            "com.topjohnwu.magisk", "com.topjohnwu.magisk.debug", "io.github.huskydg.magisk",
+            "io.github.vvb2060.magisk",
+            "eu.chainfire.supersu", "com.koushikdutta.superuser", "com.thirdparty.superuser",
+            "com.noshufou.android.su", "com.noshufou.android.su.elite", "com.yellowes.su",
+            "com.kingroot.kinguser", "com.kingo.root", "com.smedialink.oneclickroot",
+            "com.zhiqupk.root.global", "com.alephzain.framaroot",
+            "de.robv.android.xposed.installer", "de.robv.android.xposed.installer.debug",
+            "org.lsposed.manager", "io.github.lsposed.manager", "org.lsposed.lspatch",
+            "com.lspatch.manager", "com.saurik.substrate", "re.frida.server", "com.frida.server",
+            // LSPatch 的两种新形态（免 root 修补：npatch / opatch）
+            "org.lsposed.npatch", "org.lsposed.opatch",
+            // KernelSU / APatch 管理器（本机实际装的是 me.weishu.kernelsu）
+            "me.weishu.kernelsu", "me.weishu.kernelsu.debug", "me.bmax.apatch",
+            // Shizuku（ADB 提权代理，常被风控当作 root 等价物）
+            "moe.shizuku.privileged.api", "moe.shizuku.redirect",
+    };
+
+    private static volatile boolean enabled = true;
+
+    private static boolean installed;
+    private static final List<String> logged = new ArrayList<String>();
+
+    static void setEnabled(boolean on) {
+        enabled = on;
+    }
+
+    /** 是否命中敏感特征（用于文件路径）。 */
+    private static boolean hit(String s) {
+        if (s == null || s.length() == 0) return false;
+        // /system/bin/su 、/system/xbin/su 这类：要求路径正好以 "/su" 结尾，避免误伤 "…/sugar" 等
+        if (s.endsWith("/su")) return true;
+        for (int i = 0; i < SUSPECT.length; i++) {
+            if (s.indexOf(SUSPECT[i]) >= 0) return true;
+        }
+        return false;
+    }
+
+    /** 是否是「不能被发现」的包名（精确匹配，避免误伤同名子串）。 */
+    private static boolean isSuspectPackage(String pkg) {
+        if (pkg == null || pkg.length() == 0) return false;
+        for (int i = 0; i < SUSPECT_PKGS.length; i++) {
+            if (SUSPECT_PKGS[i].equalsIgnoreCase(pkg)) return true;
+        }
+        return false;
+    }
+
+    /** 从 PackageInfo / ApplicationInfo 里取包名。 */
+    private static String pkgNameOf(Object o) {
+        if (o instanceof PackageInfo) return ((PackageInfo) o).packageName;
+        if (o instanceof ApplicationInfo) return ((ApplicationInfo) o).packageName;
+        return null;
+    }
+
+    /** 诊断日志：同类命中只打一次，避免刷屏。 */
+    private static void logOnce(String line) {
+        synchronized (AntiDetect.class) {
+            if (logged.size() > 30 || logged.contains(line)) return;
+            logged.add(line);
+        }
+        HotBridge.log("[DEKK][对抗] " + line);
+    }
+
+    static synchronized void install(final ClassLoader loader) {
+        if (installed) return;
+        installed = true;
+        List<HotUnhook> hooks = new ArrayList<HotUnhook>();
+        try {
+            // ── ① File.exists()：XposedBridge.jar / su / magisk / VMOS 等路径 ──
+            hooks.add(HotHelpers.findAndHookMethod(File.class, "exists", new HotHook(10000) {
+                @Override
+                protected void beforeHookedMethod(HotParam p) {
+                    if (!enabled) return;
+                    try {
+                        File f = (File) p.thisObject;
+                        String path = f == null ? null : f.getAbsolutePath();
+                        if (hit(path)) {
+                            logOnce("File.exists(" + path + ") -> false");
+                            p.setResult(Boolean.FALSE);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }));
+
+            // ── ② Class.forName：⚠️ 已移除 ──
+            // 为什么移除：hook java.lang.Class.forName（core 类）会破坏宿主的类加载路径。
+            // 实测后果：com.deepseek.chat 启动时 androidx.startup.InitializationProvider
+            // 加载 androidx.emoji2.text.EmojiCompatInitializer 失败（真实 ClassNotFoundException，
+            // 栈里是 Class.classForName(Native)），App 启动即崩（连续 4 次）。
+            // Xposed 类检测改由 File.exists("…/XposedBridge.jar") 与包名探测覆盖，不再动 Class。
+
+            // ── ③ Settings.Global.getInt：adb_enabled / development_settings_enabled ──
+            HotHook adb = new HotHook(10000) {
+                @Override
+                protected void beforeHookedMethod(HotParam p) {
+                    if (!enabled || p.args == null || p.args.length < 2) return;
+                    try {
+                        Object k = p.args[1];
+                        if (!(k instanceof String)) return;
+                        String key = (String) k;
+                        if ("adb_enabled".equals(key) || "development_settings_enabled".equals(key)
+                                || "adb_wifi_enabled".equals(key)) {
+                            logOnce("Settings.Global.getInt(" + key + ") -> 0");
+                            p.setResult(Integer.valueOf(0));
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            };
+            hooks.add(HotHelpers.findAndHookMethod(Settings.Global.class, "getInt",
+                    ContentResolver.class, String.class, adb));
+            hooks.add(HotHelpers.findAndHookMethod(Settings.Global.class, "getInt",
+                    ContentResolver.class, String.class, Integer.TYPE, adb));
+
+            // ── ④ Debug.isDebuggerConnected() ──
+            hooks.add(HotHelpers.findAndHookMethod(Debug.class, "isDebuggerConnected", new HotHook(10000) {
+                @Override
+                protected void beforeHookedMethod(HotParam p) {
+                    if (!enabled) return;
+                    logOnce("Debug.isDebuggerConnected() -> false");
+                    p.setResult(Boolean.FALSE);
+                }
+            }));
+
+            // ── ⑤ 代理相关系统属性：⚠️ 已移除 ──
+            // 与 Class.forName 同理：hook java.lang.System（core 类）风险高于收益。
+            // 数美的主要判定项是 root / Xposed / adb / 模拟器，代理只占极小权重，
+            // 因此这里不再动 System。
+
+            // ── ⑥ 已安装应用探测：隐藏 root/Xposed/LSPatch 等包 ──
+            HotHook pkgQuery = new HotHook(10000) {
+                @Override
+                protected void beforeHookedMethod(HotParam p) {
+                    if (!enabled || p.args == null || p.args.length == 0) return;
+                    try {
+                        Object first = p.args[0];
+                        if (!(first instanceof String)) return;
+                        String pkg = (String) first;
+                        if (isSuspectPackage(pkg)) {
+                            logOnce("getPackageInfo(" + pkg + ") -> NameNotFound");
+                            p.setThrowable(new PackageManager.NameNotFoundException(pkg));
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            };
+            HotHook pkgList = new HotHook(10000) {
+                @Override
+                protected void afterHookedMethod(HotParam p) {
+                    if (!enabled) return;
+                    try {
+                        Object result = p.getResult();
+                        if (!(result instanceof List)) return;
+                        List<?> src = (List<?>) result;
+                        boolean dirty = false;
+                        for (int i = 0; i < src.size(); i++) {
+                            String pn = pkgNameOf(src.get(i));
+                            if (pn != null && isSuspectPackage(pn)) {
+                                dirty = true;
+                                break;
+                            }
+                        }
+                        if (!dirty) return;
+                        List<Object> out = new ArrayList<Object>();
+                        for (int i = 0; i < src.size(); i++) {
+                            Object o = src.get(i);
+                            String pn = pkgNameOf(o);
+                            if (pn != null && isSuspectPackage(pn)) continue;
+                            out.add(o);
+                        }
+                        p.setResult(out);
+                        logOnce("getInstalledPackages/Applications -> 已隐藏敏感包");
+                    } catch (Throwable ignored) {
+                    }
+                }
+            };
+            try {
+                Class<?> apm = HotHelpers.findClass("android.app.ApplicationPackageManager", null);
+                try {
+                    hooks.add(HotHelpers.findAndHookMethod(apm, "getPackageInfo",
+                            String.class, Integer.TYPE, pkgQuery));
+                } catch (Throwable ignored) {
+                }
+                try {
+                    hooks.add(HotHelpers.findAndHookMethod(apm, "getInstalledPackages",
+                            Integer.TYPE, pkgList));
+                } catch (Throwable ignored) {
+                }
+                try {
+                    hooks.add(HotHelpers.findAndHookMethod(apm, "getInstalledApplications",
+                            Integer.TYPE, pkgList));
+                } catch (Throwable ignored) {
+                }
+            } catch (Throwable ignored) {
+            }
+
+            HotBridge.log("[DEKK][对抗] 环境检测对抗已安装（File.exists / "
+                    + "adb_enabled / isDebuggerConnected / proxy 属性 / 包名探测）"
+                    + "［Class.forName hook 已按崩溃复盘移除］");
+        } catch (Throwable t) {
+            for (HotUnhook h : hooks) {
+                try {
+                    h.unhook();
+                } catch (Throwable ignored) {
+                }
+            }
+            HotBridge.log("[DEKK][对抗] 安装失败: " + t);
+        }
+    }
+
+    private AntiDetect() { }
+}
