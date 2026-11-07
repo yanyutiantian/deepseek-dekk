@@ -1,21 +1,98 @@
-MIT License
+DEKK 署名许可协议 1.0
+DEKK Attribution License 1.0
 
-Copyright (c) 2026 deepseek-dekk contributors
+版权所有 (c) 2026 yanyutiantian
+项目地址：https://github.com/yanyutiantian/deepseek-dekk
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+────────────────────────────────────────────────────────────
+一、总则
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+本协议只对「使用本软件的人」提出一项实质性要求：**在你的软件里声明使用了本项目的源代码**。
+除此之外，本协议不限制你的任何使用方式，也不要求你公开自己的代码。
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+────────────────────────────────────────────────────────────
+二、授予的权利
+
+在遵守第三条（署名义务）的前提下，任何人免费获得下列权利，商业与非商业用途均可：
+
+  1. 复制、使用、修改、合并本软件的全部或部分源代码；
+  2. 编译、打包、分发本软件及其修改版本；
+  3. 将本软件或其修改版本闭源发布、内部使用、对外销售或提供付费服务；
+  4. 再许可他人行使上述权利。
+
+────────────────────────────────────────────────────────────
+三、署名义务（本协议唯一的实质性限制）
+
+3.1 你在分发本软件、其修改版本，或任何包含本软件实质性代码的产品时，必须让**最终用户能够看到**下列署名信息：
+
+      「本项目使用了 yanyutiantian 的 deepseek-dekk 源代码
+        https://github.com/yanyutiantian/deepseek-dekk」
+
+3.2 展示位置按产品形态确定，必须位于用户无需特殊操作即可看到的界面或文档中：
+
+  (a) 有图形界面的软件：放在「关于」「设置 → 关于」「开源许可 / Open Source Licenses」
+      等页面，或首次启动的说明页；
+  (b) 无图形界面的程序（后端服务、API、命令行工具）：放在随附的 README、
+      部署文档或启动时输出的横幅信息中；
+  (c) 机器人 / 聊天机器人：放在其说明文档、帮助指令（如 /help、/about）的返回内容中；
+  (d) 纯源代码分发：保留本 LICENSE 文件及源文件头部的版权声明即可。
+
+3.3 不得删除、隐藏或篡改源代码文件中原有的版权声明与项目地址。
+
+3.4 署名形式可自行排版，但必须包含「deepseek-dekk」「yanyutiantian」与仓库地址三项要素，
+      且不得让用户误认为是原作者的官方版本（见第五条）。
+
+────────────────────────────────────────────────────────────
+四、无开源义务
+
+4.1 你可以修改本软件并**完全闭源**发布，无需公开任何修改后的源代码。
+4.2 你可以将本软件作为闭源产品的一部分分发，无需以相同协议授权你的衍生作品。
+4.3 本协议不是 Copyleft 协议，不产生任何「衍生作品必须开源」的义务。
+
+────────────────────────────────────────────────────────────
+五、名称与商标
+
+本协议不授予你使用「deepseek-dekk」「DEKK」名称、图标或作者身份进行宣传的权利。
+你不得暗示你的产品是原作者的官方版本、官方合作版本，或获得原作者背书。
+
+────────────────────────────────────────────────────────────
+六、免责声明
+
+本软件按「原样」提供，不附带任何明示或默示的担保，包括但不限于适销性、
+特定用途适用性与不侵权的担保。在任何情况下，作者或版权持有人均不对因本软件
+或本软件的使用或其他交易而产生的任何索赔、损害或其他责任承担责任，
+无论该责任源于合同、侵权或其他原因。
+
+────────────────────────────────────────────────────────────
+七、授权的终止与恢复
+
+7.1 你违反第三条（署名义务）时，本协议授予你的全部权利自动终止。
+7.2 若你在收到通知后 30 日内补正署名，授权自补正之日起恢复。
+7.3 依据本协议已合法获得的副本，其使用者不受他人违约的影响。
+
+────────────────────────────────────────────────────────────
+八、协议版本
+
+本协议为 1.0 版。作者可发布新版本，但你始终可以选择继续适用你获得本软件时的版本。
+
+────────────────────────────────────────────────────────────
+English Summary (non-binding, for reference only)
+
+You are free to use, modify, merge, publish, distribute, sublicense and sell
+copies of this software, for commercial or non-commercial purposes, provided
+that you give visible credit to the original project:
+
+    "This product uses source code from deepseek-dekk by yanyutiantian
+     https://github.com/yanyutiantian/deepseek-dekk"
+
+The credit must be visible to end users (an "About" / "Open Source Licenses"
+screen for GUI apps, the README or startup banner for services, /help output
+for bots, or the retained LICENSE file for source-only distribution).
+
+There is NO obligation to disclose your own source code. Modified versions may
+be distributed as closed source, under any license you choose.
+
+You may not use the project name, logo or author identity to imply official
+endorsement. The software is provided "AS IS", without warranty of any kind.
+
+The Chinese text above is the authoritative version of this license.
